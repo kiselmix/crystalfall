@@ -7,7 +7,7 @@
   <style>
     html, body { height: 100%; margin: 0; background:#0b0d12; color:#e8ecff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     #wrap { position: relative; width: 100%; height: 100%; overflow: hidden; }
-    canvas { width: 100%; height: 100%; display:block; }
+    canvas { width: 100%; height: 100%; display:block; touch-action:none; }
     .hud { position:absolute; left:12px; top:12px; display:flex; gap:10px; flex-wrap:wrap; pointer-events:none; }
     .pill {
       pointer-events:auto;
@@ -44,10 +44,97 @@
     #panel .row button:hover { background: rgba(255,255,255,.10); }
     .hint { position:absolute; left:12px; bottom:12px; color: rgba(232,236,255,.55); font-size: 12px; user-select:none; }
   </style>
+
+
+
+<style id="mobile-bottom-sheet">
+  #sheetBackdrop{
+    position:absolute; inset:0;
+    background: rgba(0,0,0,.45);
+    opacity:0; pointer-events:none;
+    transition: opacity 180ms ease;
+  }
+
+  /* Default panel styles (desktop) stay as-is, we only enhance mobile UX below */
+  .bottom-sheet .sheet-header{ display:none; }
+  .bottom-sheet .sheet-content{ }
+
+  @media (max-width: 768px){
+    html, body { height:100%; overflow:hidden; }
+
+    /* Backdrop becomes active when sheet is expanded */
+    #sheetBackdrop.is-on{ opacity:1; pointer-events:auto; }
+
+    /* Convert the info panel into a draggable bottom sheet */
+    #panel.bottom-sheet{
+      position:absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      margin: 0;
+      border-radius: 18px 18px 0 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      padding: 0;
+      box-sizing: border-box;
+
+      /* Sheet geometry */
+      height: calc(85vh + env(safe-area-inset-bottom));
+      max-height: calc(100vh - 8px);
+      transform: translate3d(0, var(--sheetY, 0px), 0);
+      transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+      will-change: transform;
+      touch-action: none; /* sheet handles its own gestures */
+      display:flex;
+      flex-direction: column;
+    }
+
+    #panel.bottom-sheet.is-dragging{ transition:none; }
+
+    #panel.bottom-sheet .sheet-header{
+      display:flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 14px 8px 14px;
+      border-bottom: 1px solid rgba(120,140,255,.12);
+      user-select:none;
+      -webkit-user-select:none;
+    }
+
+    #panel.bottom-sheet .sheet-handle{
+      width: 44px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(232,236,255,.35);
+      margin: 2px auto 0 auto;
+    }
+
+    #panel.bottom-sheet .sheet-titlebar h3{
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    #panel.bottom-sheet .sheet-content{
+      padding: 10px 14px calc(14px + env(safe-area-inset-bottom)) 14px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y; /* allow scroll inside content */
+    }
+
+    /* Keep HUD readable above */
+    .hud{ top: 10px; left: 10px; right: 10px; }
+  }
+</style>
+
 </head>
 <body>
 <div id="wrap">
   <canvas id="c"></canvas>
+  <div id="sheetBackdrop" aria-hidden="true"></div>
 
   <div class="hud">
     <div class="pill">
@@ -58,10 +145,20 @@
     </div>
   </div>
 
-  <div id="panel">
-    <h3 id="ptitle">Выбери узел</h3>
-    <div class="muted" id="pdesc">Клик по узлу — инфо. Колёсико — зум. Drag — перемещение.</div>
-    <div class="row" id="pactions" style="display:none;">
+  <div id="panel" class="bottom-sheet" role="dialog" aria-label="Информация об узле">
+    <div id="sheetHeader" class="sheet-header">
+      <div id="sheetHandle" class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-titlebar">
+        <h3 id="ptitle">Выбери узел</h3>
+      </div>
+    </div>
+    <div id="sheetContent" class="sheet-content">
+      <div class="muted" id="pdesc">Клик по узлу — инфо. Колёсико/пинч — зум. Drag/палец — перемещение.</div>
+      <div class="row" id="pactions" style="display:none;">
+        <span class="muted" id="pmeta"></span>
+      </div>
+    </div>
+  </div><div class="row" id="pactions" style="display:none;">
       <span class="muted" id="pmeta"></span>
     </div>
   </div>
@@ -411,7 +508,7 @@
     if (!selectedId) {
       $ptitle.textContent = state.startId ? 'Select a node' : 'Select a character class';
       $pdesc.textContent = state.startId
-        ? 'Click a node to level up. Click an unlocked node again to reset the branch from that node (cascade). Wheel to zoom. Drag to move.'
+        ? 'Click a node to level up. Click an unlocked node again to reset the branch from that node (cascade). Wheel/pinch to zoom. Drag to move.'
         : 'First, choose a character class: Knight, Rogue, Technomancer. Click again on the chosen class to reset the whole build.';
       $pactions.style.display = 'none';
       return;
@@ -439,48 +536,173 @@
   }
 
   // ---- Events ----
-  canvas.addEventListener('mousedown', (e) => { dragging = true; last = { x: e.clientX, y: e.clientY }; });
-  window.addEventListener('mouseup', () => dragging = false);
-  window.addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - last.x, dy = e.clientY - last.y;
-    last = { x: e.clientX, y: e.clientY };
-    view.x -= dx / view.z; view.y -= dy / view.z;
-    render();
-  });
+// Unified pointer events (mouse + touch). Supports:
+// - 1 finger / mouse drag: pan
+// - 2 fingers: pinch zoom (anchored at pinch midpoint)
+// - tap: select / toggle node
+const ptr = {
+  active: new Map(),     // pointerId -> { sx, sy }
+  last: new Map(),       // pointerId -> { sx, sy }
+  tap: null,             // { id, sx, sy, t, moved }
+  pinch: null,           // { dist, z0, world0:{x,y}, mid:{sx,sy} }
+};
 
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const before = screenToWorld(e.offsetX, e.offsetY);
-    const delta = Math.sign(e.deltaY);
-    view.z = Math.max(0.08, Math.min(2.2, view.z * (delta > 0 ? 0.92 : 1.08)));
-    const after = screenToWorld(e.offsetX, e.offsetY);
+function localPosFromEvent(e) {
+  const r = canvas.getBoundingClientRect();
+  return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+}
+function dist(a, b) {
+  const dx = a.sx - b.sx, dy = a.sy - b.sy;
+  return Math.hypot(dx, dy);
+}
+function midpoint(a, b) {
+  return { sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2 };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  // Prevent page scroll/zoom on mobile
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+
+  const p = localPosFromEvent(e);
+  ptr.active.set(e.pointerId, p);
+  ptr.last.set(e.pointerId, p);
+
+  // Start tap candidate only when it becomes the first active pointer
+  if (ptr.active.size === 1) {
+    ptr.tap = { id: e.pointerId, sx: p.sx, sy: p.sy, t: performance.now(), moved: false };
+  }
+
+  // When second finger goes down -> start pinch
+  if (ptr.active.size === 2) {
+    const ids = [...ptr.active.keys()];
+    const a = ptr.active.get(ids[0]);
+    const b = ptr.active.get(ids[1]);
+    const mid = midpoint(a, b);
+    ptr.pinch = {
+      dist: Math.max(1, dist(a, b)),
+      z0: view.z,
+      mid,
+      world0: screenToWorld(mid.sx, mid.sy),
+    };
+    // pinch cancels tap
+    ptr.tap = null;
+  }
+}, { passive: false });
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!ptr.active.has(e.pointerId)) return;
+  e.preventDefault();
+
+  const p = localPosFromEvent(e);
+  const prev = ptr.last.get(e.pointerId) || p;
+  ptr.active.set(e.pointerId, p);
+  ptr.last.set(e.pointerId, p);
+
+  // Tap move threshold
+  if (ptr.tap && ptr.tap.id === e.pointerId) {
+    const mdx = p.sx - ptr.tap.sx, mdy = p.sy - ptr.tap.sy;
+    if ((mdx*mdx + mdy*mdy) > 36) ptr.tap.moved = true; // 6px
+  }
+
+  if (ptr.active.size === 1 && !ptr.pinch) {
+    // Pan
+    const dx = p.sx - prev.sx;
+    const dy = p.sy - prev.sy;
+    view.x -= dx / view.z;
+    view.y -= dy / view.z;
+    render();
+    return;
+  }
+
+  if (ptr.active.size >= 2) {
+    // Pinch zoom (use the first two active pointers)
+    const ids = [...ptr.active.keys()];
+    const a = ptr.active.get(ids[0]);
+    const b = ptr.active.get(ids[1]);
+    const mid = midpoint(a, b);
+
+    // Init pinch state if somehow missing
+    if (!ptr.pinch) {
+      ptr.pinch = {
+        dist: Math.max(1, dist(a, b)),
+        z0: view.z,
+        mid,
+        world0: screenToWorld(mid.sx, mid.sy),
+      };
+    }
+
+    const d = Math.max(1, dist(a, b));
+    const ratio = d / ptr.pinch.dist;
+    const zNew = Math.max(0.08, Math.min(2.2, ptr.pinch.z0 * ratio));
+
+    // Anchor zoom at the current midpoint: keep the world point under midpoint stable
+    const before = ptr.pinch.world0;
+    view.z = zNew;
+    const after = screenToWorld(mid.sx, mid.sy);
     view.x += (before.x - after.x);
     view.y += (before.y - after.y);
+
     render();
-  }, { passive: false });
+  }
+}, { passive: false });
 
-  canvas.addEventListener('click', (e) => {
-    const n = pickNodeAt(e.offsetX, e.offsetY);
-    if (!n) { selectedId = null; updatePanel(); render(); return; }
+function endPointer(e) {
+  if (!ptr.active.has(e.pointerId)) return;
+  e.preventDefault();
 
-    // Previews for class selection screen (before class chosen)
-    if (!state.startId) state.charPreviewId = START_IDS.includes(n.id) ? n.id : null;
+  const p = localPosFromEvent(e);
 
-    toggleNode(n.id);
-    selectedId = n.id;
+  // If this was a tap (no pinch, minimal move, short time) -> treat as click/tap
+  if (ptr.tap && ptr.tap.id === e.pointerId && !ptr.tap.moved && !ptr.pinch) {
+    const dt = performance.now() - ptr.tap.t;
+    if (dt < 450) {
+      // Tap to select/toggle
+      const n = pickNodeAt(p.sx, p.sy);
+      if (!n) { selectedId = null; updatePanel(); render(); }
+      else {
+        if (!state.startId) state.charPreviewId = START_IDS.includes(n.id) ? n.id : null;
+        toggleNode(n.id);
+        selectedId = n.id;
+        updatePanel();
+        render();
+      }
+    }
+  }
 
-    updatePanel();
-    render();
-  });
+  ptr.active.delete(e.pointerId);
+  ptr.last.delete(e.pointerId);
 
-  canvas.addEventListener('dblclick', (e) => {
-    const n = pickNodeAt(e.offsetX, e.offsetY);
-    if (!n) return;
-    view.x = n.x;
-    view.y = n.y;
-    render();
-  });
+  // If pinch ended (fingers < 2) -> clear pinch anchor
+  if (ptr.active.size < 2) ptr.pinch = null;
+
+  // Reset tap if no pointers
+  if (ptr.active.size === 0) ptr.tap = null;
+}
+
+canvas.addEventListener('pointerup', endPointer, { passive: false });
+canvas.addEventListener('pointercancel', endPointer, { passive: false });
+
+// Desktop wheel zoom (still useful with mouse/trackpad)
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const before = screenToWorld(e.offsetX, e.offsetY);
+  const delta = Math.sign(e.deltaY);
+  view.z = Math.max(0.08, Math.min(2.2, view.z * (delta > 0 ? 0.92 : 1.08)));
+  const after = screenToWorld(e.offsetX, e.offsetY);
+  view.x += (before.x - after.x);
+  view.y += (before.y - after.y);
+  render();
+}, { passive: false });
+
+// Desktop convenience: double click centers the camera on a node
+canvas.addEventListener('dblclick', (e) => {
+  const n = pickNodeAt(e.offsetX, e.offsetY);
+  if (!n) return;
+  view.x = n.x;
+  view.y = n.y;
+  render();
+});
 
   $reset.addEventListener('click', () => {
     state.unlocked.clear();
@@ -512,6 +734,195 @@
   resize();
   updatePanel();
   render();
+})();
+</script>
+
+
+<script id="mobile-bottom-sheet-js">
+(() => {
+  const isMobile = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+  if (!isMobile) return;
+
+  const sheet = document.getElementById("panel");
+  const header = document.getElementById("sheetHeader");
+  const content = document.getElementById("sheetContent");
+  const backdrop = document.getElementById("sheetBackdrop");
+  if (!sheet || !header || !content || !backdrop) return;
+
+  // Snap heights in px (visible part of sheet)
+  const COLLAPSED = 96;              // shows handle + title
+  const MID_RATIO = 0.45;            // 45vh
+  const FULL_RATIO = 0.85;           // 85vh (matches CSS height)
+
+  let state = "collapsed"; // collapsed | mid | full
+  let sheetH = 0;
+  let yCollapsed = 0, yMid = 0, yFull = 0;
+
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function recalc() {
+    const vh = window.innerHeight;
+    // Sheet total height matches CSS: ~85vh (+ safe area). We compute based on actual layout:
+    sheetH = sheet.getBoundingClientRect().height;
+
+    const midVisible = Math.round(vh * MID_RATIO);
+    const fullVisible = Math.round(vh * FULL_RATIO);
+
+    // TranslateY values (how much sheet is pushed down)
+    yFull = Math.max(0, sheetH - fullVisible);   // usually 0-ish
+    yMid  = clamp(sheetH - midVisible, yFull, sheetH - COLLAPSED);
+    yCollapsed = sheetH - COLLAPSED;
+
+    apply(state, true);
+  }
+
+  function setBackdrop(on){
+    backdrop.classList.toggle("is-on", on);
+  }
+
+  function apply(next, immediate=false) {
+    state = next;
+
+    let y = yCollapsed;
+    if (state === "mid") y = yMid;
+    if (state === "full") y = yFull;
+
+    if (immediate) {
+      const prev = sheet.style.transition;
+      sheet.style.transition = "none";
+      sheet.style.setProperty("--sheetY", `${y}px`);
+      // force reflow
+      sheet.offsetHeight;
+      sheet.style.transition = prev;
+    } else {
+      sheet.style.setProperty("--sheetY", `${y}px`);
+    }
+
+    setBackdrop(state !== "collapsed");
+
+    // Lock content scrolling when collapsed to avoid "scroll stealing"
+    content.style.pointerEvents = (state === "collapsed") ? "none" : "auto";
+  }
+
+  // Tap backdrop to collapse
+  backdrop.addEventListener("click", () => apply("collapsed"));
+
+  // Tap header to toggle between collapsed and mid
+  header.addEventListener("click", (e) => {
+    // If user is dragging, click will be prevented.
+    if (state === "collapsed") apply("mid");
+    else apply("collapsed");
+  });
+
+  // Drag logic (pointer events)
+  let dragging = false;
+  let startY = 0;
+  let startSheetY = 0;
+  let lastY = 0;
+  let lastT = 0;
+  let velocity = 0; // px/ms
+
+  function getCurrentY() {
+    const val = getComputedStyle(sheet).getPropertyValue("--sheetY").trim();
+    const n = parseFloat(val.replace("px",""));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function onDown(ev) {
+    // Only start dragging from header (handle area) to avoid fighting with content scroll.
+    // Also allow dragging from top part of content when at top (like native sheets).
+    const target = ev.target;
+    const inHeader = header.contains(target);
+    const inContent = content.contains(target);
+
+    if (!inHeader && !inContent) return;
+
+    if (inContent) {
+      if (content.scrollTop > 0) return; // if user is scrolling content, don't drag sheet
+      // If touch is in content but at top, allow pull-down/pull-up sheet
+    }
+
+    dragging = true;
+    sheet.classList.add("is-dragging");
+    sheet.setPointerCapture?.(ev.pointerId);
+
+    startY = ev.clientY;
+    startSheetY = getCurrentY();
+    lastY = ev.clientY;
+    lastT = performance.now();
+    velocity = 0;
+
+    // prevent canvas pan/zoom gestures underneath
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+
+  function onMove(ev) {
+    if (!dragging) return;
+
+    const now = performance.now();
+    const dy = ev.clientY - startY;
+    const y = clamp(startSheetY + dy, yFull, yCollapsed);
+
+    const dt = now - lastT;
+    if (dt > 0) velocity = (ev.clientY - lastY) / dt;
+
+    lastY = ev.clientY;
+    lastT = now;
+
+    sheet.style.setProperty("--sheetY", `${y}px`);
+    setBackdrop(y < yCollapsed - 1);
+
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+
+  function nearestSnap(y) {
+    // Consider velocity for more natural flings
+    const v = velocity;
+
+    // If fast swipe down -> collapse
+    if (v > 0.8) return "collapsed";
+    // If fast swipe up -> full
+    if (v < -0.8) return "full";
+
+    // Otherwise choose nearest
+    const dC = Math.abs(y - yCollapsed);
+    const dM = Math.abs(y - yMid);
+    const dF = Math.abs(y - yFull);
+    const min = Math.min(dC, dM, dF);
+    if (min === dF) return "full";
+    if (min === dM) return "mid";
+    return "collapsed";
+  }
+
+  function onUp(ev) {
+    if (!dragging) return;
+    dragging = false;
+    sheet.classList.remove("is-dragging");
+
+    const y = getCurrentY();
+    apply(nearestSnap(y));
+
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+
+  // Use pointer events (works for touch + mouse); canvas already uses pointer too.
+  sheet.addEventListener("pointerdown", onDown, { passive: false });
+  sheet.addEventListener("pointermove", onMove, { passive: false });
+  sheet.addEventListener("pointerup", onUp, { passive: false });
+  sheet.addEventListener("pointercancel", onUp, { passive: false });
+
+  window.addEventListener("resize", recalc);
+  window.addEventListener("orientationchange", recalc);
+
+  // Start collapsed
+  recalc();
+  apply("collapsed", true);
+
+  // Expose small helper for debugging (optional)
+  window.__sheet = { apply, recalc };
 })();
 </script>
 
