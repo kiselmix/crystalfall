@@ -45,6 +45,28 @@
     .hint { position:absolute; left:12px; bottom:12px; color: rgba(232,236,255,.55); font-size: 12px; user-select:none; }
     /* Desktop panel title */
   #panel > #ptitle{ margin: 0 0 6px 0; font-size: 16px; }
+
+    /* Tooltip near cursor on node hover */
+    #tooltip{
+      position:absolute;
+      z-index: 50;
+      max-width: 280px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(20,24,36,.92);
+      border: 1px solid rgba(120,140,255,.18);
+      box-shadow: 0 10px 28px rgba(0,0,0,.45);
+      backdrop-filter: blur(8px);
+      color:#e8ecff;
+      font-size: 12.5px;
+      line-height: 1.3;
+      pointer-events:none;
+      display:none;
+      transform: translate3d(0,0,0);
+    }
+    #tooltip .t-title{ font-weight: 650; font-size: 13px; margin-bottom: 4px; }
+    #tooltip .t-desc{ color: rgba(232,236,255,.78); }
+
 </style>
 
 
@@ -141,6 +163,7 @@ html, body { height:100%; overflow:hidden; }
 <div id="wrap">
   <canvas id="c"></canvas>
   <div id="sheetBackdrop" aria-hidden="true"></div>
+  <div id="tooltip" role="tooltip" aria-hidden="true"><div class="t-title"></div><div class="t-desc"></div></div>
 
   <div class="hud">
     <div class="pill">
@@ -509,6 +532,52 @@ const $pdesc = document.getElementById('pdesc');
     return best;
   }
 
+
+  // ---- Hover tooltip (desktop) ----
+  const $tooltip = document.getElementById('tooltip');
+  const $ttTitle = $tooltip ? $tooltip.querySelector('.t-title') : null;
+  const $ttDesc  = $tooltip ? $tooltip.querySelector('.t-desc') : null;
+  let hoverId = null;
+
+  function showTooltipForNode(n, sx, sy) {
+    if (!$tooltip || !$ttTitle || !$ttDesc || !n) return;
+    const title = (n.title && String(n.title).trim()) ? String(n.title).trim() : n.id;
+    const rawDesc = (n.desc ?? n.description ?? n.info ?? n.text ?? n.tooltip ?? '');
+    const desc = (rawDesc && String(rawDesc).trim()) ? String(rawDesc).trim() : 'Описание пока не заполнено.';
+
+    $ttTitle.textContent = title;
+    $ttDesc.textContent = desc;
+
+    $tooltip.style.display = 'block';
+    $tooltip.setAttribute('aria-hidden', 'false');
+
+    // Position near cursor, clamp to viewport
+    const pad = 12;
+    const off = 14;
+
+    // measure after display
+    const tw = $tooltip.offsetWidth;
+    const th = $tooltip.offsetHeight;
+
+    let x = sx + off;
+    let y = sy + off;
+
+    const maxX = canvas.clientWidth - tw - pad;
+    const maxY = canvas.clientHeight - th - pad;
+
+    if (x > maxX) x = Math.max(pad, sx - tw - off);
+    if (y > maxY) y = Math.max(pad, sy - th - off);
+
+    $tooltip.style.left = `${x}px`;
+    $tooltip.style.top  = `${y}px`;
+  }
+
+  function hideTooltip() {
+    if (!$tooltip) return;
+    $tooltip.style.display = 'none';
+    $tooltip.setAttribute('aria-hidden', 'true');
+  }
+
   function updatePanel() {
     if (!selectedId) {
       $ptitle.textContent = state.startId ? 'Select a node' : 'Select a character class';
@@ -567,6 +636,8 @@ function midpoint(a, b) {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
+  hideTooltip();
+  hoverId = null;
   // Prevent page scroll/zoom on mobile
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
@@ -710,6 +781,29 @@ canvas.addEventListener('dblclick', (e) => {
   view.y = n.y;
   render();
 });
+
+
+  // Desktop hover: show node description next to cursor (does not interfere with touch).
+  canvas.addEventListener('mousemove', (e) => {
+    // Avoid showing while actively panning/pinching
+    if (ptr.active.size) { hideTooltip(); hoverId = null; return; }
+
+    const n = pickNodeAt(e.offsetX, e.offsetY);
+    if (!n) {
+      if (hoverId !== null) { hoverId = null; hideTooltip(); }
+      return;
+    }
+
+    hoverId = n.id;
+    showTooltipForNode(n, e.offsetX, e.offsetY);
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoverId = null;
+    hideTooltip();
+  });
+
+
 
   $reset.addEventListener('click', () => {
     state.unlocked.clear();
