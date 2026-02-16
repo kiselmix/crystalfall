@@ -43,7 +43,9 @@
     #panel .row button { background: rgba(255,255,255,.06); border:1px solid rgba(120,140,255,.18); color:#e8ecff; border-radius:12px; padding:8px 10px; cursor:pointer; }
     #panel .row button:hover { background: rgba(255,255,255,.10); }
     .hint { position:absolute; left:12px; bottom:12px; color: rgba(232,236,255,.55); font-size: 12px; user-select:none; }
-  </style>
+    /* Desktop panel title */
+  #panel > #ptitle{ margin: 0 0 6px 0; font-size: 16px; }
+</style>
 
 
 
@@ -60,7 +62,11 @@
   .bottom-sheet .sheet-content{ }
 
   @media (max-width: 768px){
-    html, body { height:100%; overflow:hidden; }
+    
+    /* Hide desktop title inside panel on mobile to avoid duplicates */
+    #panel.bottom-sheet > #ptitle{ display:none; }
+
+html, body { height:100%; overflow:hidden; }
 
     /* Backdrop becomes active when sheet is expanded */
     #sheetBackdrop.is-on{ opacity:1; pointer-events:auto; }
@@ -146,10 +152,11 @@
   </div>
 
   <div id="panel" class="bottom-sheet" role="dialog" aria-label="Информация об узле">
-    <div id="sheetHeader" class="sheet-header">
+        <h3 id="ptitle">Выбери узел</h3>
+<div id="sheetHeader" class="sheet-header">
       <div id="sheetHandle" class="sheet-handle" aria-hidden="true"></div>
       <div class="sheet-titlebar">
-        <h3 id="ptitle">Выбери узел</h3>
+        <h3 id="ptitleMobile">Выбери узел</h3>
       </div>
     </div>
     <div id="sheetContent" class="sheet-content">
@@ -157,9 +164,6 @@
       <div class="row" id="pactions" style="display:none;">
         <span class="muted" id="pmeta"></span>
       </div>
-    </div>
-  </div><div class="row" id="pactions" style="display:none;">
-      <span class="muted" id="pmeta"></span>
     </div>
   </div>
 
@@ -177,7 +181,8 @@
   const $stats = document.getElementById('stats');
 
   const $ptitle = document.getElementById('ptitle');
-  const $pdesc = document.getElementById('pdesc');
+  const $ptitleMobile = document.getElementById('ptitleMobile');
+const $pdesc = document.getElementById('pdesc');
   const $pactions = document.getElementById('pactions');
   const $pmeta = document.getElementById('pmeta');
 
@@ -507,6 +512,7 @@
   function updatePanel() {
     if (!selectedId) {
       $ptitle.textContent = state.startId ? 'Select a node' : 'Select a character class';
+      if ($ptitleMobile) $ptitleMobile.textContent = $ptitle.textContent;
       $pdesc.textContent = state.startId
         ? 'Click a node to level up. Click an unlocked node again to reset the branch from that node (cascade). Wheel/pinch to zoom. Drag to move.'
         : 'First, choose a character class: Knight, Rogue, Technomancer. Click again on the chosen class to reset the whole build.';
@@ -519,6 +525,7 @@
     const desc = (n.desc && String(n.desc).trim()) ? String(n.desc).trim() : 'The description is empty for now.';
 
     $ptitle.textContent = title;
+    if ($ptitleMobile) $ptitleMobile.textContent = title;
     $pdesc.textContent = desc;
 
     const u = isUnlocked(n.id);
